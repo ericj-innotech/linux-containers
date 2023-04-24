@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+
+read -p "Enter desired IPv4 address for bridge (default: 172.30.0.1): " ipv4addr
+if [[ -z "$ipv4addr" ]]; then
+  ipv4addr=172.30.0.1
+fi
+
+read -p "Enter desired CIDR for $ipv4addr (default: 24): " ipv4cidr
+if [[ -z "$ipv4cidr" ]]; then
+  ipv4cidr=24
+fi
+
+sudo snap install lxd
+lxd init --minimal
+lxc network set lxdbr0 ipv4.address=$ipv4addr/$ipv4cidr
+
+# Enable resolved on the bridge and after every boot.
+export IPV4ADDR=$ipv4addr
+cat templates/lxd-dns-lxdbr0.tmpl | envsubst | sudo tee /etc/systemd/system/lxd-dns-lxdbr0.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now lxd-dns-lxdbr0

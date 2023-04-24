@@ -1,0 +1,53 @@
+#!/usr/bin/bash
+
+read -p "Enter container image name (default: ubuntu:lts): " container_image
+if [[ -z "$container_image" ]]; then
+  container_image="ubuntu:lts"
+fi
+
+read -p "Enter hostname postfix ($(hostname)-[postfix]): " postfix
+hostname=$(hostname)-$postfix
+echo "Using: $hostname"
+
+read -p "Enter source home directory to mount (default: $HOME): " homedir
+if [[ -z "$homedir" ]]; then
+  homedir=$HOME
+fi
+
+while true; do
+  read -p "Autostart on boot (y/n): " answer
+  if [[ -z "$answer" ]]; then
+    echo "Please enter a valid answer."
+  elif [[ "$answer" == "y" ]]; then
+    autostart=true
+    break
+  elif [[ "$answer" == "n" ]]; then
+    autostart=false
+    break
+  else
+    echo "Please enter 'y' or 'n'."
+  fi
+done
+
+echo "Using: $homedir"
+if [[ -d "$homedir" ]]; then
+  # Add our UID so it gets converted properly when mounting.
+  if ! grep -q "^root:$(id -u):1$" /etc/subuid; then
+    echo "Adding root:$(id -u):1 to /etc/subuid"
+    echo "root:$(id -u):1" | sudo tee -a /etc/subuid
+  fi
+  # Add our GID so it gets converted properly when mounting.
+  if ! grep -q "^root:$(id -g):1$" /etc/subgid; then
+    echo "Adding root:$(id -g):1 to /etc/subgid"
+    echo "root:$(id -g):1" | sudo tee -a /etc/subgid
+  fi
+
+  export GECOS=$(getent passwd $USER | cut -d ':' -f 5)
+  lxc launch $container_image $hostname --config=user.user-data="$(cat templates/cloud-init.tmpl | envsubst)" --config=boot.autostart=$autostart
+  echo -en "uid $(id -u) 1000\ngid $(id -g) 1000" | lxc config set $hostname raw.idmap -
+  lxc config device add $hostname $(echo ${homedir//[^a-zA-Z0-9]/-} | sed 's/^[^[:alnum:]]*//;s/[^[:alnum:]]*$//') disk source=$homedir/ path=$HOME/
+  lxc exec $hostname -- sh -c "cloud-init status --wait"
+  lxc restart $hostname
+else
+    echo "Invalid home directory, aborting"
+fi
